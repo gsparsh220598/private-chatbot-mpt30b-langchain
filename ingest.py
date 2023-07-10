@@ -35,6 +35,7 @@ source_directory = os.environ.get("SOURCE_DIRECTORY", "source_documents")
 embeddings_model_name = os.environ.get("EMBEDDINGS_MODEL_NAME")
 chunk_size = 1200
 chunk_overlap = 200
+MAX_CHUNKS_TO_INGEST = 900
 oss = False
 
 # Map file extensions to document loaders and their arguments
@@ -151,25 +152,20 @@ def get_emb_cost_estimates(docs):
 
 
 @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6))
-def create_new_db(texts, embeddings):
-    """
-    function to create new a new vectorstore with exponential backoff to avoid rate limit error
-    """
-    db = Chroma.from_documents(
-        texts,
-        embeddings,
-        persist_directory=persist_directory,
-        client_settings=CHROMA_SETTINGS,
-    )
-    return db
-
-
-@retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6))
 def add2db(db, texts):
     """
     function to add more documents to an existing vectorstore
     """
     db.add_documents(texts)
+    return db
+
+
+def make_embeddings(db, texts):
+    for i in range(1, len(texts) // MAX_CHUNKS_TO_INGEST):
+        db = add2db(
+            db, texts[i * MAX_CHUNKS_TO_INGEST : (i + 1) * MAX_CHUNKS_TO_INGEST]
+        )
+        db.persist()
     return db
 
 
@@ -188,26 +184,32 @@ def main():
         db = Chroma(
             persist_directory=persist_directory,
             embedding_function=embeddings,
-            client_settings=CHROMA_SETTINGS,
+            # client_settings=CHROMA_SETTINGS,
         )
         collection = db.get()
         texts = process_documents(
             [metadata["source"] for metadata in collection["metadatas"]]
         )
         print(f"Creating embeddings. May take some minutes...")
-        db = add2db(db, texts)
+        db = make_embeddings(db, texts)
     else:
         # Create and store locally vectorstore
         print("Creating new vectorstore")
         texts = process_documents()
         print(f"Creating embeddings. May take some minutes...")
-        db = create_new_db(texts, embeddings)
-    db.persist()
+
+        db = Chroma.from_documents(
+            texts[:MAX_CHUNKS_TO_INGEST],
+            embeddings,
+            persist_directory=persist_directory,
+            # client_settings=CHROMA_SETTINGS,
+        )
+        db.persist()
+        print(f"Created vectorstore at {persist_directory}")
+        db = make_embeddings(db, texts[MAX_CHUNKS_TO_INGEST:])
     db = None
 
-    print(
-        f"Ingestion complete! You can now run chat_with_docs.py to query your documents"
-    )
+    print(f"Ingestion complete! You can now run chat.py to query your documents")
 
 
 if __name__ == "__main__":
