@@ -32,10 +32,10 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 persist_directory = os.environ.get("PERSIST_DIRECTORY")
 # directory where source documents to be ingested are located
 source_directory = os.environ.get("SOURCE_DIRECTORY", "source_documents")
-# embeddings_model_name = os.environ.get("EMBEDDINGS_MODEL_NAME")
+embeddings_model_name = os.environ.get("EMBEDDINGS_MODEL_NAME")
 chunk_size = 1200
 chunk_overlap = 200
-
+oss = False
 
 # Map file extensions to document loaders and their arguments
 LOADER_MAPPING = {
@@ -175,7 +175,11 @@ def add2db(db, texts):
 
 def main():
     # Create embeddings
-    embeddings = OpenAIEmbeddings()
+    oss = bool(input("Do you want to use open source stuff? (y/n): ") == "y")
+    if oss:
+        embeddings = HuggingFaceEmbeddings(model_name=embeddings_model_name)
+    else:
+        embeddings = OpenAIEmbeddings()
     # embeddings = HuggingFaceEmbeddings(model_name=embeddings_model_name)
     db_exists = does_vectorstore_exist(persist_directory)
     if db_exists:
