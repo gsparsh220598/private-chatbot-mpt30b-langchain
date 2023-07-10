@@ -3,43 +3,49 @@ import os
 from multiprocessing import Pool
 from typing import List
 
+import openai
 from dotenv import load_dotenv
 from langchain.docstore.document import Document
-from langchain.document_loaders import (CSVLoader, PyMuPDFLoader, TextLoader,
-                                        UnstructuredEmailLoader,
-                                        UnstructuredEPubLoader,
-                                        UnstructuredHTMLLoader,
-                                        UnstructuredMarkdownLoader,
-                                        UnstructuredODTLoader,
-                                        UnstructuredPowerPointLoader,
-                                        UnstructuredWordDocumentLoader)
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.document_loaders import (
+    CSVLoader,
+    PyMuPDFLoader,
+    TextLoader,
+    UnstructuredEmailLoader,
+    UnstructuredEPubLoader,
+    UnstructuredHTMLLoader,
+    UnstructuredMarkdownLoader,
+    UnstructuredODTLoader,
+    UnstructuredPowerPointLoader,
+    UnstructuredWordDocumentLoader,
+)
+from langchain.embeddings import HuggingFaceEmbeddings, OpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import Chroma
 from tqdm import tqdm
+from tenacity import retry, wait_random_exponential, stop_after_attempt
 
 from constants import CHROMA_SETTINGS
 
 load_dotenv()
-
+openai.api_key = os.getenv("OPENAI_API_KEY")
 #  Load environment variables
 persist_directory = os.environ.get("PERSIST_DIRECTORY")
 # directory where source documents to be ingested are located
 source_directory = os.environ.get("SOURCE_DIRECTORY", "source_documents")
-embeddings_model_name = os.environ.get("EMBEDDINGS_MODEL_NAME")
-chunk_size = 1000
-chunk_overlap = 100
+# embeddings_model_name = os.environ.get("EMBEDDINGS_MODEL_NAME")
+chunk_size = 1200
+chunk_overlap = 200
 
 
 # Map file extensions to document loaders and their arguments
 LOADER_MAPPING = {
-    ".csv": (CSVLoader, {}),
+    # ".csv": (CSVLoader, {}),
     ".docx": (UnstructuredWordDocumentLoader, {}),
     ".eml": (UnstructuredEmailLoader, {}),
     ".epub": (UnstructuredEPubLoader, {}),
-    ".html": (UnstructuredHTMLLoader, {}),
+    ".html": (UnstructuredHTMLLoader, {"encoding": "latin"}),
     ".md": (UnstructuredMarkdownLoader, {}),
-    ".odt": (UnstructuredODTLoader, {}),
+    # ".odt": (UnstructuredODTLoader, {}),
     ".pdf": (PyMuPDFLoader, {}),
     ".pptx": (UnstructuredPowerPointLoader, {}),
     ".txt": (TextLoader, {"encoding": "utf8"}),
@@ -51,9 +57,12 @@ def load_single_document(file_path: str) -> List[Document]:
     if ext in LOADER_MAPPING:
         loader_class, loader_args = LOADER_MAPPING[ext]
         loader = loader_class(file_path, **loader_args)
+        # print(f"Loading {file_path}")
         return loader.load()
+    else:
+        pass
 
-    raise ValueError(f"Unsupported file extension '{ext}'")
+    # raise ValueError(f"Unsupported file extension '{ext}'")
 
 
 def load_documents(source_dir: str, ignored_files: List[str] = []) -> List[Document]:
@@ -65,9 +74,12 @@ def load_documents(source_dir: str, ignored_files: List[str] = []) -> List[Docum
         all_files.extend(
             glob.glob(os.path.join(source_dir, f"**/*{ext}"), recursive=True)
         )
+    print(f"Found {len(all_files)} files")
+    print(f"Ignoring {len(ignored_files)} files")
     filtered_files = [
         file_path for file_path in all_files if file_path not in ignored_files
     ]
+    print(f"Loading {len(filtered_files)} new documents")
 
     with Pool(processes=os.cpu_count()) as pool:
         results = []
@@ -93,6 +105,10 @@ def process_documents(ignored_files: List[str] = []) -> List[Document]:
         print("No new documents to load")
         exit(0)
     print(f"Loaded {len(documents)} new documents from {source_directory}")
+    get_emb_cost_estimates(documents)
+    proceed = input("Do you want to proceed? (y/n): ")
+    if proceed == "n":
+        exit(0)
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size, chunk_overlap=chunk_overlap
     )
@@ -121,11 +137,48 @@ def does_vectorstore_exist(persist_directory: str) -> bool:
     return False
 
 
+def get_emb_cost_estimates(docs):
+    total_characters = 0
+    for doc in docs:
+        total_characters += len(doc.page_content)
+
+    total_tokens = total_characters / 4
+    emb_cost = total_tokens * 0.0001 / 1000  # 0.0001 USD per 1000 tokens
+
+    print("Total number of characters:", total_characters)
+    print("Total number of tokens:", total_tokens)
+    print("Cost of creating embeddings:", emb_cost)
+
+
+@retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6))
+def create_new_db(texts, embeddings):
+    """
+    function to create new a new vectorstore with exponential backoff to avoid rate limit error
+    """
+    db = Chroma.from_documents(
+        texts,
+        embeddings,
+        persist_directory=persist_directory,
+        client_settings=CHROMA_SETTINGS,
+    )
+    return db
+
+
+@retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6))
+def add2db(db, texts):
+    """
+    function to add more documents to an existing vectorstore
+    """
+    db.add_documents(texts)
+    return db
+
+
 def main():
     # Create embeddings
-    embeddings = HuggingFaceEmbeddings(model_name=embeddings_model_name)
-
-    if does_vectorstore_exist(persist_directory):
+    embeddings = OpenAIEmbeddings()
+    # embeddings = HuggingFaceEmbeddings(model_name=embeddings_model_name)
+    db_exists = does_vectorstore_exist(persist_directory)
+    if db_exists:
         # Update and store locally vectorstore
         print(f"Appending to existing vectorstore at {persist_directory}")
         db = Chroma(
@@ -138,18 +191,13 @@ def main():
             [metadata["source"] for metadata in collection["metadatas"]]
         )
         print(f"Creating embeddings. May take some minutes...")
-        db.add_documents(texts)
+        db = add2db(db, texts)
     else:
         # Create and store locally vectorstore
         print("Creating new vectorstore")
         texts = process_documents()
         print(f"Creating embeddings. May take some minutes...")
-        db = Chroma.from_documents(
-            texts,
-            embeddings,
-            persist_directory=persist_directory,
-            client_settings=CHROMA_SETTINGS,
-        )
+        db = create_new_db(texts, embeddings)
     db.persist()
     db = None
 
