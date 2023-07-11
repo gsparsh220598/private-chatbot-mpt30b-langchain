@@ -26,6 +26,7 @@ from constants import *
 
 load_dotenv()
 
+openai.api_key = os.environ.get("OPENAI_API_KEY")
 embeddings_model_name = os.environ.get("EMBEDDINGS_MODEL_NAME")
 persist_directory = os.environ.get("PERSIST_DIRECTORY")
 model_path = os.environ.get("MODEL_PATH")
