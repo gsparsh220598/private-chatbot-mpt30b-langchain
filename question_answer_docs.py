@@ -44,6 +44,7 @@ class AnswerConversationBufferMemory(ConversationBufferMemory):
         )
 
 
+# TODO: use only last 15 messages
 def load_chat_history(qa=True):
     """
     Load the memory from a json file.
@@ -56,6 +57,8 @@ def load_chat_history(qa=True):
                 retrieve_from_db = []
             else:
                 retrieve_from_db = json.load(f)
+            # use only last 15 messages
+            retrieve_from_db = retrieve_from_db[-1 * CHAT_HISTORY_LEN :]
     except FileNotFoundError:
         retrieve_from_db = []
     retrieved_messages = messages_from_dict(retrieve_from_db)

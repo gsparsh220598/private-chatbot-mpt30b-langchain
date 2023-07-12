@@ -68,3 +68,4 @@ CHAT_PROMPT = PromptTemplate(
 CHAIN_TYPE = "stuff"
 CHAT_MODEL = "gpt-3.5-turbo-0613"
 CONDENSE_MODEL = "text-davinci-002"
+CHAT_HISTORY_LEN = 15
