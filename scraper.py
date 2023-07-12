@@ -4,6 +4,7 @@ import os
 import zipfile
 import shutil
 
+## !wget -r -A.html -P lillog https://lilianweng.github.io
 
 base_url = "https://ocw.mit.edu/courses/"
 
