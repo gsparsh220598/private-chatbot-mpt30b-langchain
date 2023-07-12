@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import time
+import json
 
 from dotenv import load_dotenv
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
@@ -11,12 +12,14 @@ from langchain.retrievers.document_compressors import (
     LLMChainFilter,
     EmbeddingsFilter,
 )
-from langchain.memory import ConversationBufferMemory
+from langchain.memory import ConversationBufferMemory, ChatMessageHistory
 from langchain.llms import CTransformers, OpenAI
 from langchain.chat_models import ChatOpenAI
 from langchain.vectorstores import Chroma
+from langchain import LLMChain
+from langchain.schema.messages import messages_to_dict, messages_from_dict
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 from IPython.display import Markdown, HTML, display
 
 import openai
@@ -41,8 +44,51 @@ class AnswerConversationBufferMemory(ConversationBufferMemory):
         )
 
 
-def main(oss=False):
-    # Prepare the retriever
+def load_chat_history(qa=True):
+    """
+    Load the memory from a json file.
+    taken from: https://stackoverflow.com/questions/75965605/how-to-persist-langchain-conversation-memory-save-and-load
+    """
+    # safely load the chat_history.json file create new one if it doesn't exist
+    try:
+        with open("chat_history.json", "r") as f:
+            if os.stat("chat_history.json").st_size == 0:
+                retrieve_from_db = []
+            else:
+                retrieve_from_db = json.load(f)
+    except FileNotFoundError:
+        retrieve_from_db = []
+    retrieved_messages = messages_from_dict(retrieve_from_db)
+    retrieved_chat_history = ChatMessageHistory(messages=retrieved_messages)
+    if qa:
+        retrieved_memory = AnswerConversationBufferMemory(
+            chat_memory=retrieved_chat_history,
+            memory_key="chat_history",
+            return_messages=True,
+        )
+    else:
+        retrieved_memory = ConversationBufferMemory(
+            chat_memory=retrieved_chat_history,
+            memory_key="history",
+            # input_key="question",
+            return_messages=True,
+        )
+    return retrieved_memory
+
+
+def save_chat_history(chain):
+    """
+    Load the memory from a json file.
+    taken from: https://stackoverflow.com/questions/75965605/how-to-persist-langchain-conversation-memory-save-and-load
+    """
+    extracted_msgs = chain.memory.chat_memory.messages
+    ingest_to_db = messages_to_dict(extracted_msgs)
+    # safely save the json file
+    with open("chat_history.json", "w") as f:
+        json.dump(ingest_to_db, f)
+
+
+def get_retriever(oss):
     if oss:
         embeddings = HuggingFaceEmbeddings(model_name=embeddings_model_name)
     else:
@@ -53,9 +99,13 @@ def main(oss=False):
         # client_settings=CHROMA_SETTINGS,
     )
     retriever = db.as_retriever(search_kwargs={"k": target_source_chunks})
-    memory = AnswerConversationBufferMemory(
-        memory_key="chat_history", return_messages=True
-    )
+    return retriever
+
+
+def get_qa_chain(llm, retriever, memory):
+    """
+    Get the QA chain.
+    """
     qa = ConversationalRetrievalChain.from_llm(
         llm=llm,
         retriever=retriever,
@@ -64,11 +114,22 @@ def main(oss=False):
         chain_type=CHAIN_TYPE,
         return_source_documents=True,
     )
-    qa.combine_docs_chain.llm_chain.prompt = PROMPT
+    qa.combine_docs_chain.llm_chain.prompt = QA_PROMPT
+    return qa
+
+
+def main(oss=False):
+    # Prepare the retriever
+    retriever = get_retriever(oss)
+    memory = load_chat_history(qa=True)
+    # Prepare the QA chain
+    qa = get_qa_chain(llm, retriever, memory)
     # Interactive questions and answers over your docs
     while True:
         query = input("\nEnter a question: ")
         if query == "exit":
+            # save the chat history
+            save_chat_history(qa)
             break
         if query.strip() == "":
             continue
@@ -87,9 +148,9 @@ def main(oss=False):
             print(f"\n> Answer (took {round(end - start, 2)} s.):")
             # print(display(Markdown(answer)))
 
-            # # Print the relevant sources used for the answer
-            # for document in docs:
-            #     print("\n> " + document.metadata["source"] + ":")
+            # Print the relevant sources used for the answer
+            for document in docs:
+                print("\n> " + document.metadata["source"] + ":")
             #     print(document.page_content)
         except Exception as e:
             print(str(e))

@@ -3,12 +3,6 @@ import os
 from chromadb.config import Settings
 from dotenv import load_dotenv
 
-from langchain.prompts.chat import (
-    ChatPromptTemplate,
-    SystemMessagePromptTemplate,
-    AIMessagePromptTemplate,
-    HumanMessagePromptTemplate,
-)
 from langchain import PromptTemplate
 
 load_dotenv()
@@ -24,38 +18,53 @@ CHROMA_SETTINGS = Settings(
     anonymized_telemetry=False,
 )
 
-template = """
+condense_template = """
+Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question.
+
+Chat History:
+{chat_history}
+Follow Up Input: {question}
+Standalone question:
+"""
+
+qa_template = """
 You are a highly intelligent and helpful research assistant specializing in AI and its applications. 
 You always answer truthfully and do not make up answers.
-Your job is to research relevent information from context. And answer the questions like an expert.
+Your job is to research relevent information from context and the chat history. And answer the questions like an expert.
 If you do not find the an appropriate answer in context, just say I don't know.
 
-{context}
-"""
-system_message_prompt = SystemMessagePromptTemplate(
-    prompt=PromptTemplate(
-        input_variables=["context"],
-        output_parser=None,
-        partial_variables={},
-        template=template,
-        template_format="f-string",
-        validate_template=True,
-    ),
-    additional_kwargs={},
-)
-human_message_prompt = HumanMessagePromptTemplate(
-    prompt=PromptTemplate(
-        input_variables=["question"],
-        output_parser=None,
-        partial_variables={},
-        template="{question}",
-        template_format="f-string",
-        validate_template=True,
-    ),
-    additional_kwargs={},
-)
-PROMPT = ChatPromptTemplate.from_messages([system_message_prompt, human_message_prompt])
+chat history:
+{chat_history}
 
+Context:
+{context}
+
+Question:
+{question}
+Helpful Answer in Markdown:
+"""
+
+chat_template = """
+You are a helpful AI assistant. You answer truthfully and do not make up answers.
+Your job is to answer the user's questions referring to the chat history when required.
+If you do not know the answer, just say I don't know.
+
+chat history:
+{history}
+
+Human: {input}
+AI:
+"""
+
+QA_PROMPT = PromptTemplate(
+    template=qa_template, input_variables=["chat_history", "context", "question"]
+)
+CONDENSE_PROMPT = PromptTemplate(
+    template=condense_template, input_variables=["chat_history", "question"]
+)
+CHAT_PROMPT = PromptTemplate(
+    template=chat_template, input_variables=["history", "input"]
+)
 CHAIN_TYPE = "stuff"
 CHAT_MODEL = "gpt-3.5-turbo-0613"
-COND_MODEL = "text-davinci-002"
+CONDENSE_MODEL = "text-davinci-002"
