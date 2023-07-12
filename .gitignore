@@ -165,3 +165,6 @@ source_documents/
 .vscode/
 
 .DS_Store
+
+#chat history
+chat_history.json
