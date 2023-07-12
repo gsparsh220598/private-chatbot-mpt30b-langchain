@@ -44,13 +44,7 @@ class AnswerConversationBufferMemory(ConversationBufferMemory):
         )
 
 
-# TODO: use only last 15 messages
-def load_chat_history(qa=True):
-    """
-    Load the memory from a json file.
-    taken from: https://stackoverflow.com/questions/75965605/how-to-persist-langchain-conversation-memory-save-and-load
-    """
-    # safely load the chat_history.json file create new one if it doesn't exist
+def retrieve_chat_history(chat_len=0):
     try:
         with open("chat_history.json", "r") as f:
             if os.stat("chat_history.json").st_size == 0:
@@ -58,10 +52,20 @@ def load_chat_history(qa=True):
             else:
                 retrieve_from_db = json.load(f)
             # use only last 15 messages
-            retrieve_from_db = retrieve_from_db[-1 * CHAT_HISTORY_LEN :]
+        retrieve_from_db = retrieve_from_db[-1 * chat_len :]
     except FileNotFoundError:
         retrieve_from_db = []
     retrieved_messages = messages_from_dict(retrieve_from_db)
+    return retrieved_messages
+
+
+def load_chat_history(qa=True):
+    """
+    Load the memory from a json file.
+    taken from: https://stackoverflow.com/questions/75965605/how-to-persist-langchain-conversation-memory-save-and-load
+    """
+    # safely load the chat_history.json file create new one if it doesn't exist
+    retrieved_messages = retrieve_chat_history(CHAT_HISTORY_LEN)
     retrieved_chat_history = ChatMessageHistory(messages=retrieved_messages)
     if qa:
         retrieved_memory = AnswerConversationBufferMemory(
@@ -86,7 +90,7 @@ def save_chat_history(chain):
     """
     extracted_msgs = chain.memory.chat_memory.messages
     ingest_to_db = messages_to_dict(extracted_msgs)
-    # safely save the json file
+    # safely append to the chat_history.json file
     with open("chat_history.json", "w") as f:
         json.dump(ingest_to_db, f)
 

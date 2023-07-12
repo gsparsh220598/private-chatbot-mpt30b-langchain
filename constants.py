@@ -29,9 +29,8 @@ Standalone question:
 
 qa_template = """
 You are a highly intelligent and helpful research assistant specializing in AI and its applications. 
-You always answer truthfully and do not make up answers.
-Your job is to research relevent information from context and the chat history. And answer the questions like an expert.
-If you do not find the an appropriate answer in context, just say I don't know.
+Think step-by-step the tasks you would need to accomplish to answer the question, then research relevent information from context and the chat history. And answer the questions like an expert.
+You always answer truthfully and do not make up answers. If you do not find the an appropriate answer in context, just say I don't know.
 
 chat history:
 {chat_history}
@@ -45,9 +44,8 @@ Helpful Answer in Markdown:
 """
 
 chat_template = """
-You are a helpful AI assistant. You answer truthfully and do not make up answers.
-Your job is to answer the user's questions referring to the chat history when required.
-If you do not know the answer, just say I don't know.
+You are a helpful AI assistant. You always think step-by-step about the tasks you would need to accomplish, to answer the question.
+You can refer to the chat history when required. You answer truthfully and do not make up answers. If you do not know the answer, just say I don't know.
 
 chat history:
 {history}
