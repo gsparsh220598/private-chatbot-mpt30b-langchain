@@ -1,18 +1,18 @@
 import os
-from dataclasses import asdict, dataclass
-from typing import List, Dict, Any
 
 from dotenv import load_dotenv
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.llms import CTransformers
 from langchain.chat_models import ChatOpenAI
 from langchain.chains import ConversationChain
-from langchain.memory import ConversationBufferMemory
 import openai
 
-from utils import format_prompt
 from constants import CHAT_MODEL, CHAT_PROMPT
-from question_answer_docs import load_chat_history, save_chat_history
+from memory import load_chat_history, save_chat_history
+from embeddings import get_embeddings
+from cache import *
+
+# from question_answer_docs import load_model
 
 load_dotenv()
 
@@ -40,19 +40,20 @@ openai.api_key = os.environ.get("OPENAI_API_KEY")
 #     # reset: bool
 
 
-def get_conv_chain():
+def get_conv_chain(vs_type="redis"):
     # load the memory from a json file
-    retrieved_memory = load_chat_history(qa=False)
+    retrieved_memory = load_chat_history(qa=False, vs_type=vs_type)
     return ConversationChain(llm=llm, memory=retrieved_memory, prompt=CHAT_PROMPT)
 
 
-def load_model(oss=False):
+def load_model(emb_type):
     try:
         # check if the model is already downloaded
         print("Loading model...")
-        global llm
+        global llm, cond_llm
         # initialize llm
-        if oss:
+        emb_type = bool(emb_type == "hf")
+        if emb_type:
             llm = CTransformers(
                 model=os.path.abspath(model_path),
                 model_type="mpt",
@@ -66,6 +67,7 @@ def load_model(oss=False):
                 streaming=True,
                 callbacks=[StreamingStdOutCallbackHandler()],
             )
+            # cond_llm = OpenAI(model=COND_MODEL, temperature=0.1)
         return True
 
     except Exception as e:
@@ -75,9 +77,10 @@ def load_model(oss=False):
 
 if __name__ == "__main__":
     # load model if it has already been downloaded. If not prompt the user to download it.
-    oss = bool(input("Do you want to use open source stuff? (y/n): ") == "y")
-    load_model(oss)
-    chain = get_conv_chain()
+    emb_type = str(input("choose embedding type (openai/hf): "))
+    vs_type = str(input("choose vectorstore type (chroma/redis): "))
+    load_model(emb_type)
+    chain = get_conv_chain(vs_type=vs_type)
     # generation_config = GenerationConfig(
     #     temperature=0.1,
     #     top_k=0,
@@ -97,7 +100,7 @@ if __name__ == "__main__":
         query = input("\nEnter a question: ")
         if query == "exit":
             # save the chat history
-            save_chat_history(chain)
+            save_chat_history(chain, vs_type=vs_type)
             break
         if query.strip() == "":
             continue

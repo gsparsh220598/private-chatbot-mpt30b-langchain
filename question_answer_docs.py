@@ -5,20 +5,18 @@ import json
 
 from dotenv import load_dotenv
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
-from langchain.chains import RetrievalQA, ConversationalRetrievalChain
-from langchain.memory import ConversationBufferMemory, ChatMessageHistory
+from langchain.chains import ConversationalRetrievalChain
 from langchain.llms import CTransformers, OpenAI
 from langchain.chat_models import ChatOpenAI
-from langchain.schema.messages import messages_to_dict, messages_from_dict
-
-from typing import Any, Dict, List
-from IPython.display import Markdown, HTML, display
 
 import openai
 
+from memory import *
 from embeddings import *
 from vector_stores import *
 from constants import *
+
+# from cache import *
 
 load_dotenv()
 
@@ -27,65 +25,6 @@ embeddings_model_name = os.environ.get("EMBEDDINGS_MODEL_NAME")
 persist_directory = os.environ.get("PERSIST_DIRECTORY")
 model_path = os.environ.get("MODEL_PATH")
 target_source_chunks = int(os.environ.get("TARGET_SOURCE_CHUNKS", 10))
-
-
-# TODO: cite where the soln has been taken from
-class AnswerConversationBufferMemory(ConversationBufferMemory):
-    def save_context(self, inputs: Dict[str, Any], outputs: Dict[str, str]) -> None:
-        return super(AnswerConversationBufferMemory, self).save_context(
-            inputs, {"response": outputs["answer"]}
-        )
-
-
-def retrieve_chat_history(chat_len=0):
-    try:
-        with open("chat_history.json", "r") as f:
-            if os.stat("chat_history.json").st_size == 0:
-                retrieve_from_db = []
-            else:
-                retrieve_from_db = json.load(f)
-            # use only last 15 messages
-        retrieve_from_db = retrieve_from_db[-1 * chat_len :]
-    except FileNotFoundError:
-        retrieve_from_db = []
-    retrieved_messages = messages_from_dict(retrieve_from_db)
-    return retrieved_messages
-
-
-def load_chat_history(qa=True):
-    """
-    Load the memory from a json file.
-    taken from: https://stackoverflow.com/questions/75965605/how-to-persist-langchain-conversation-memory-save-and-load
-    """
-    # safely load the chat_history.json file create new one if it doesn't exist
-    retrieved_messages = retrieve_chat_history(CHAT_HISTORY_LEN)
-    retrieved_chat_history = ChatMessageHistory(messages=retrieved_messages)
-    if qa:
-        retrieved_memory = AnswerConversationBufferMemory(
-            chat_memory=retrieved_chat_history,
-            memory_key="chat_history",
-            return_messages=True,
-        )
-    else:
-        retrieved_memory = ConversationBufferMemory(
-            chat_memory=retrieved_chat_history,
-            memory_key="history",
-            # input_key="question",
-            return_messages=True,
-        )
-    return retrieved_memory
-
-
-def save_chat_history(chain):
-    """
-    Load the memory from a json file.
-    taken from: https://stackoverflow.com/questions/75965605/how-to-persist-langchain-conversation-memory-save-and-load
-    """
-    extracted_msgs = chain.memory.chat_memory.messages
-    ingest_to_db = messages_to_dict(extracted_msgs)
-    # safely append to the chat_history.json file
-    with open("chat_history.json", "w") as f:
-        json.dump(ingest_to_db, f)
 
 
 def get_retriever(emb_type, vs_type):
@@ -116,7 +55,7 @@ def get_qa_chain(llm, retriever, memory):
 def main(emb_type, vs_type):
     # Prepare the retriever
     retriever = get_retriever(emb_type, vs_type)
-    memory = load_chat_history(qa=True)
+    memory = load_chat_history(qa=True, vs_type=vs_type)
     # Prepare the QA chain
     qa = get_qa_chain(llm, retriever, memory)
     # Interactive questions and answers over your docs
