@@ -18,13 +18,15 @@ from langchain.document_loaders import (
     UnstructuredPowerPointLoader,
     UnstructuredWordDocumentLoader,
 )
-from langchain.embeddings import HuggingFaceEmbeddings, OpenAIEmbeddings
+from langchain.embeddings import FakeEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import Chroma
 from tqdm import tqdm
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 
 from constants import CHROMA_SETTINGS
+from embeddings import *
+from vector_stores import *
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -118,37 +120,34 @@ def process_documents(ignored_files: List[str] = []) -> List[Document]:
     return texts
 
 
-def does_vectorstore_exist(persist_directory: str) -> bool:
+def does_vectorstore_exist(persist_directory: str, vs_type: str) -> bool:
     """
-    Checks if vectorstore exists
+    Checks if vectorstore index exists
     """
-    if os.path.exists(os.path.join(persist_directory, "index")):
-        if os.path.exists(
-            os.path.join(persist_directory, "chroma-collections.parquet")
-        ) and os.path.exists(
-            os.path.join(persist_directory, "chroma-embeddings.parquet")
-        ):
-            list_index_files = glob.glob(os.path.join(persist_directory, "index/*.bin"))
-            list_index_files += glob.glob(
-                os.path.join(persist_directory, "index/*.pkl")
-            )
-            # At least 3 documents are needed in a working vectorstore
-            if len(list_index_files) > 3:
-                return True
-    return False
-
-
-def get_emb_cost_estimates(docs):
-    total_characters = 0
-    for doc in docs:
-        total_characters += len(doc.page_content)
-
-    total_tokens = total_characters / 4
-    emb_cost = total_tokens * 0.0001 / 1000  # 0.0001 USD per 1000 tokens
-
-    print("Total number of characters:", total_characters)
-    print("Total number of tokens:", total_tokens)
-    print("Cost of creating embeddings:", emb_cost)
+    if vs_type == "redis":
+        try:
+            _ = load_vector_store(FakeEmbeddings(), persist_directory, vs_type)
+            return True
+        except Exception as e:
+            print(str(e))
+            return False
+    elif vs_type == "chroma":
+        if os.path.exists(os.path.join(persist_directory, "index")):
+            if os.path.exists(
+                os.path.join(persist_directory, "chroma-collections.parquet")
+            ) and os.path.exists(
+                os.path.join(persist_directory, "chroma-embeddings.parquet")
+            ):
+                list_index_files = glob.glob(
+                    os.path.join(persist_directory, "index/*.bin")
+                )
+                list_index_files += glob.glob(
+                    os.path.join(persist_directory, "index/*.pkl")
+                )
+                # At least 3 documents are needed in a working vectorstore
+                if len(list_index_files) > 3:
+                    return True
+        return False
 
 
 @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6))
@@ -171,41 +170,26 @@ def make_embeddings(db, texts):
 
 def main():
     # Create embeddings
-    oss = bool(input("Do you want to use open source stuff? (y/n): ") == "y")
-    if oss:
-        embeddings = HuggingFaceEmbeddings(model_name=embeddings_model_name)
-    else:
-        embeddings = OpenAIEmbeddings()
+    emb_type = str(input("choose embedding type (openai/hf): "))
+    vs_type = str(input("choose vectorstore type (chroma/redis): "))
+    embeddings = get_embeddings(emb_type)
     # embeddings = HuggingFaceEmbeddings(model_name=embeddings_model_name)
-    db_exists = does_vectorstore_exist(persist_directory)
+    db_exists = does_vectorstore_exist(persist_directory, vs_type)
     if db_exists:
         # Update and store locally vectorstore
-        print(f"Appending to existing vectorstore at {persist_directory}")
-        db = Chroma(
-            persist_directory=persist_directory,
-            embedding_function=embeddings,
-            # client_settings=CHROMA_SETTINGS,
-        )
+        db = load_vector_store(embeddings, persist_directory, vs_type)
         collection = db.get()
         texts = process_documents(
             [metadata["source"] for metadata in collection["metadatas"]]
         )
-        print(f"Creating embeddings. May take some minutes...")
         db = make_embeddings(db, texts)
     else:
         # Create and store locally vectorstore
         print("Creating new vectorstore")
         texts = process_documents()
-        print(f"Creating embeddings. May take some minutes...")
-
-        db = Chroma.from_documents(
-            texts[:MAX_CHUNKS_TO_INGEST],
-            embeddings,
-            persist_directory=persist_directory,
-            # client_settings=CHROMA_SETTINGS,
+        db = create_vector_store(
+            texts[:MAX_CHUNKS_TO_INGEST], embeddings, persist_directory, vs_type
         )
-        db.persist()
-        print(f"Created vectorstore at {persist_directory}")
         db = make_embeddings(db, texts[MAX_CHUNKS_TO_INGEST:])
     db = None
 
