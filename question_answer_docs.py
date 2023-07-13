@@ -6,17 +6,9 @@ import json
 from dotenv import load_dotenv
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.chains import RetrievalQA, ConversationalRetrievalChain
-from langchain.embeddings import HuggingFaceEmbeddings, OpenAIEmbeddings
-from langchain.retrievers.document_compressors import (
-    LLMChainExtractor,
-    LLMChainFilter,
-    EmbeddingsFilter,
-)
 from langchain.memory import ConversationBufferMemory, ChatMessageHistory
 from langchain.llms import CTransformers, OpenAI
 from langchain.chat_models import ChatOpenAI
-from langchain.vectorstores import Chroma
-from langchain import LLMChain
 from langchain.schema.messages import messages_to_dict, messages_from_dict
 
 from typing import Any, Dict, List
