@@ -20,7 +20,6 @@ from langchain.document_loaders import (
 )
 from langchain.embeddings import FakeEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import Chroma
 from tqdm import tqdm
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 

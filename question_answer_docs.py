@@ -24,7 +24,8 @@ from IPython.display import Markdown, HTML, display
 
 import openai
 
-
+from embeddings import *
+from vector_stores import *
 from constants import *
 
 load_dotenv()
@@ -95,15 +96,10 @@ def save_chat_history(chain):
         json.dump(ingest_to_db, f)
 
 
-def get_retriever(oss):
-    if oss:
-        embeddings = HuggingFaceEmbeddings(model_name=embeddings_model_name)
-    else:
-        embeddings = OpenAIEmbeddings()
-    db = Chroma(
-        persist_directory=persist_directory,
-        embedding_function=embeddings,
-        # client_settings=CHROMA_SETTINGS,
+def get_retriever(emb_type, vs_type):
+    embeddings = get_embeddings(emb_type)
+    db = load_vector_store(
+        embeddings=embeddings, persist_directory=persist_directory, vs_type=vs_type
     )
     retriever = db.as_retriever(search_kwargs={"k": target_source_chunks})
     return retriever
@@ -125,9 +121,9 @@ def get_qa_chain(llm, retriever, memory):
     return qa
 
 
-def main(oss=False):
+def main(emb_type, vs_type):
     # Prepare the retriever
-    retriever = get_retriever(oss)
+    retriever = get_retriever(emb_type, vs_type)
     memory = load_chat_history(qa=True)
     # Prepare the QA chain
     qa = get_qa_chain(llm, retriever, memory)
@@ -164,13 +160,14 @@ def main(oss=False):
             raise
 
 
-def load_model(oss=False):
+def load_model(emb_type):
     try:
         # check if the model is already downloaded
         print("Loading model...")
         global llm, cond_llm
         # initialize llm
-        if oss:
+        emb_type = bool(emb_type == "hf")
+        if emb_type:
             llm = CTransformers(
                 model=os.path.abspath(model_path),
                 model_type="mpt",
@@ -194,6 +191,7 @@ def load_model(oss=False):
 
 if __name__ == "__main__":
     # load model if it has already been downloaded. If not prompt the user to download it.
-    oss = bool(input("Do you want to use open source stuff? (y/n): ") == "y")
-    load_model(oss)
-    main(oss)
+    emb_type = str(input("choose embedding type (openai/hf): "))
+    vs_type = str(input("choose vectorstore type (chroma/redis): "))
+    load_model(emb_type)
+    main(emb_type, vs_type)
