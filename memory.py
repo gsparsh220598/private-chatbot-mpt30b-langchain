@@ -43,7 +43,6 @@ def load_chat_history(qa=True, vs_type="redis"):
     Load the memory from a json file.
     taken from: https://stackoverflow.com/questions/75965605/how-to-persist-langchain-conversation-memory-save-and-load
     """
-    # safely load the chat_history.json file create new one if it doesn't exist
     if vs_type == "redis":
         retrieved_chat_history = RedisChatMessageHistory(
             session_id=f"{MEM_INDEX_NAME}:",

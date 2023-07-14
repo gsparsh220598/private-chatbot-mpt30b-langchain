@@ -25,13 +25,15 @@ embeddings_model_name = os.environ.get("EMBEDDINGS_MODEL_NAME")
 persist_directory = os.environ.get("PERSIST_DIRECTORY")
 model_path = os.environ.get("MODEL_PATH")
 target_source_chunks = int(os.environ.get("TARGET_SOURCE_CHUNKS", 10))
+emb_type = os.environ.get("EMB_TYPE")
+vs_type = os.environ.get("VS_TYPE")
 
 
-def get_retriever(emb_type, vs_type):
-    embeddings = get_embeddings(emb_type)
-    db = load_vector_store(
-        embeddings=embeddings, persist_directory=persist_directory, vs_type=vs_type
-    )
+def get_retriever(vs_type):
+    if vs_type == "redis":
+        db = load_redis_vector_store()
+    elif vs_type == "chroma":
+        db = load_chroma_vector_store(persist_directory)
     retriever = db.as_retriever(search_kwargs={"k": target_source_chunks})
     return retriever
 
@@ -52,9 +54,9 @@ def get_qa_chain(llm, retriever, memory):
     return qa
 
 
-def main(emb_type, vs_type):
+def main(vs_type):
     # Prepare the retriever
-    retriever = get_retriever(emb_type, vs_type)
+    retriever = get_retriever(vs_type)
     memory = load_chat_history(qa=True, vs_type=vs_type)
     # Prepare the QA chain
     qa = get_qa_chain(llm, retriever, memory)
@@ -62,8 +64,6 @@ def main(emb_type, vs_type):
     while True:
         query = input("\nEnter a question: ")
         if query == "exit":
-            # save the chat history
-            save_chat_history(qa)
             break
         if query.strip() == "":
             continue
@@ -122,7 +122,5 @@ def load_model(emb_type):
 
 if __name__ == "__main__":
     # load model if it has already been downloaded. If not prompt the user to download it.
-    emb_type = str(input("choose embedding type (openai/hf): "))
-    vs_type = str(input("choose vectorstore type (chroma/redis): "))
     load_model(emb_type)
-    main(emb_type, vs_type)
+    main(vs_type)

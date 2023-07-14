@@ -10,7 +10,8 @@ import openai
 from constants import CHAT_MODEL, CHAT_PROMPT
 from memory import load_chat_history, save_chat_history
 from embeddings import get_embeddings
-from cache import *
+
+# from cache import *
 
 # from question_answer_docs import load_model
 
@@ -18,6 +19,8 @@ load_dotenv()
 
 model_path = os.environ.get("MODEL_PATH")
 openai.api_key = os.environ.get("OPENAI_API_KEY")
+emb_type = os.environ.get("EMB_TYPE")
+vs_type = os.environ.get("VS_TYPE")
 
 # @dataclass
 # class GenerationConfig:
@@ -77,10 +80,8 @@ def load_model(emb_type):
 
 if __name__ == "__main__":
     # load model if it has already been downloaded. If not prompt the user to download it.
-    emb_type = str(input("choose embedding type (openai/hf): "))
-    vs_type = str(input("choose vectorstore type (chroma/redis): "))
     load_model(emb_type)
-    chain = get_conv_chain(vs_type=vs_type)
+    chain = get_conv_chain(vs_type)
     # generation_config = GenerationConfig(
     #     temperature=0.1,
     #     top_k=0,
@@ -99,8 +100,6 @@ if __name__ == "__main__":
     while True:
         query = input("\nEnter a question: ")
         if query == "exit":
-            # save the chat history
-            save_chat_history(chain, vs_type=vs_type)
             break
         if query.strip() == "":
             continue
