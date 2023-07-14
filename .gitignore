@@ -160,11 +160,15 @@ db/
 
 # data folder
 source_documents/
+source_documents_copy/
 
 #vscode settings
 .vscode/
+
+dump.rdb
 
 .DS_Store
 
 #chat history
 chat_history.json
+keys_metadata.json

@@ -44,10 +44,13 @@ def load_chat_history(qa=True, vs_type="redis"):
     taken from: https://stackoverflow.com/questions/75965605/how-to-persist-langchain-conversation-memory-save-and-load
     """
     if vs_type == "redis":
-        retrieved_chat_history = RedisChatMessageHistory(
-            session_id=f"{MEM_INDEX_NAME}:",
-            url=REDIS_URL,
-        )
+        try:
+            retrieved_chat_history = RedisChatMessageHistory(
+                session_id=f"{MEM_INDEX_NAME}:",
+                url=REDIS_URL,
+            )
+        except:
+            retrieved_chat_history = ChatMessageHistory(messages=[])
     else:
         retrieved_messages = retrieve_chat_history(CHAT_HISTORY_LEN)
         retrieved_chat_history = ChatMessageHistory(
