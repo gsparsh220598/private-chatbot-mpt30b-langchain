@@ -3,6 +3,7 @@ import os
 from multiprocessing import Pool
 from typing import List
 import json
+from pathlib import Path
 
 import openai
 from dotenv import load_dotenv
@@ -15,18 +16,14 @@ from langchain.document_loaders import (
     UnstructuredEPubLoader,
     UnstructuredHTMLLoader,
     UnstructuredMarkdownLoader,
-    UnstructuredODTLoader,
     UnstructuredPowerPointLoader,
     UnstructuredWordDocumentLoader,
 )
-from langchain.embeddings import OpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from tqdm import tqdm
 
-from constants import CHROMA_SETTINGS
 from embeddings import *
 from vector_stores import (
-    load_chroma_vector_store,
     load_redis_vector_store,
     create_chroma_vector_store,
     create_redis_vector_store,
@@ -40,9 +37,9 @@ persist_directory = os.environ.get("PERSIST_DIRECTORY")
 source_directory = os.environ.get("SOURCE_DIRECTORY", "source_documents")
 embeddings_model_name = os.environ.get("EMBEDDINGS_MODEL_NAME")
 vs_type = os.environ.get("VS_TYPE")
-chunk_size = 1200
-chunk_overlap = 200
-MAX_CHUNKS_TO_INGEST = 900
+chunk_size = 1000
+chunk_overlap = 100
+# MAX_CHUNKS_TO_INGEST = 900
 oss = False
 path_keys_json = "keys_metadata.json"
 
@@ -57,7 +54,7 @@ LOADER_MAPPING = {
     # ".odt": (UnstructuredODTLoader, {}),
     ".pdf": (PyMuPDFLoader, {}),
     ".pptx": (UnstructuredPowerPointLoader, {}),
-    ".txt": (TextLoader, {"encoding": "utf8"}),
+    ".txt": (TextLoader, {}),
 }
 
 
@@ -104,46 +101,14 @@ def process_documents() -> List[Document]:
     """
     print(f"Loading documents from {source_directory}")
     documents = load_documents(source_directory)
-    # testing
-    documents = documents[:10]
     print(f"Loaded {len(documents)} documents from {source_directory}")
-    get_emb_cost_estimates(documents)
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size, chunk_overlap=chunk_overlap
     )
     texts = text_splitter.split_documents(documents)
+    get_emb_cost_estimates(texts)
     print(f"Split into {len(texts)} chunks of text (max. {chunk_size} tokens each)")
     return texts
-
-
-def does_vectorstore_exist(persist_directory: str, vs_type: str) -> bool:
-    """
-    Checks if vectorstore index exists
-    """
-    if vs_type == "redis":
-        try:
-            _ = load_redis_vector_store()
-            return True
-        except Exception as e:
-            print(str(e))
-            return False
-    elif vs_type == "chroma":
-        if os.path.exists(os.path.join(persist_directory, "index")):
-            if os.path.exists(
-                os.path.join(persist_directory, "chroma-collections.parquet")
-            ) and os.path.exists(
-                os.path.join(persist_directory, "chroma-embeddings.parquet")
-            ):
-                list_index_files = glob.glob(
-                    os.path.join(persist_directory, "index/*.bin")
-                )
-                list_index_files += glob.glob(
-                    os.path.join(persist_directory, "index/*.pkl")
-                )
-                # At least 3 documents are needed in a working vectorstore
-                if len(list_index_files) > 3:
-                    return True
-        return False
 
 
 def check_if_embeddings_exist(metadatas) -> bool:
@@ -160,8 +125,9 @@ def check_if_embeddings_exist(metadatas) -> bool:
             if os.stat(path_keys_json).st_size == 0:
                 return None
             keys_metadata = json.load(f)
-        existing_metadata = set(keys_metadata.values())
-        filtered_metadata = list(unique_metadatas.difference(existing_metadata))
+        existing_metadata = [m for m in keys_metadata.values()]
+        unq_existing_metadata = set(existing_metadata)
+        filtered_metadata = list(unique_metadatas.difference(unq_existing_metadata))
         print(f"Found {len(filtered_metadata)} new documents to ingest")
         return
     else:
@@ -172,27 +138,30 @@ def create_dict_from_keys(keys, metadata):
     """
     Create a dictionary from keys and metadata
     """
-    dict = {}
-    for i in range(len(keys)):
-        dict[keys[i]] = metadata[i]
-    json.dump(dict, open("keys_metadata.json", "w"))
-    return dict
+    with open(path_keys_json, "r+") as f:
+        if os.stat(path_keys_json).st_size != 0:
+            j = json.load(f)
+            for i in range(len(keys)):
+                j[keys[i]] = metadata[i]
+            f.seek(0)
+            json.dump(j, f, indent=4)
+        else:
+            j = {}
+            for i in range(len(keys)):
+                j[keys[i]] = metadata[i]
+            json.dump(j, f, indent=4)
 
 
 def process_docs_util():
     docs = process_documents()
     texts = [d.page_content for d in docs]
     metadatas = [d.metadata for d in docs]
-    # print(metadatas[:5])
     return texts, metadatas
 
 
-def create_safe_embeddings(db):
+def create_safe_embeddings():
     texts, metadata = process_docs_util()
     unq_filtered_metadata = check_if_embeddings_exist(metadata)
-    proceed = input("Do you want to proceed with creating embeddings? (y/n): ")
-    if proceed == "n":
-        exit(0)
     filtered_texts = []
     filtered_metadatas = []
     if unq_filtered_metadata != None:
@@ -200,39 +169,28 @@ def create_safe_embeddings(db):
             if metadata in unq_filtered_metadata:
                 filtered_texts.append(t)
                 filtered_metadatas.append(m)
-        keys = db.add_texts(filtered_texts, filtered_metadatas)
-        create_dict_from_keys(keys, filtered_metadatas)
+        print(f"Found {len(filtered_texts)} new docs to ingest")
+        return filtered_texts, filtered_metadatas
     else:
-        keys = db.add_texts(texts, metadata)
-        create_dict_from_keys(keys, metadata)
+        print("Found no docs in the keys_metadata.json file")
+        return texts, metadata
 
 
 def main():
-    # vs_type = str(input("choose vectorstore type (chroma/redis): "))
-    db_exists = does_vectorstore_exist(persist_directory, vs_type)
-    # db_exists = False
-    if db_exists:
-        if vs_type == "redis":
-            db = load_redis_vector_store()
-            create_safe_embeddings(db)
-
-        elif vs_type == "chroma":
-            db = load_chroma_vector_store(persist_directory)
-            create_safe_embeddings(db)
-        else:
-            raise NotImplementedError()
+    texts, metadatas = create_safe_embeddings()
+    proceed = input("Do you want to proceed with creating embeddings? (y/n): ")
+    if proceed == "n":
+        exit(0)
+    if vs_type == "redis":
+        keys = create_redis_vector_store(texts, metadatas)
+        create_dict_from_keys(keys, metadatas)
+    elif vs_type == "chroma":
+        keys = create_chroma_vector_store(texts, persist_directory)
+        create_dict_from_keys(keys, metadatas)
     else:
-        texts, metadatas = process_docs_util()
-        if vs_type == "redis":
-            keys = create_redis_vector_store(texts, metadatas)
-            create_dict_from_keys(keys, metadatas)  # start from here
-        elif vs_type == "chroma":
-            keys = create_chroma_vector_store(texts, persist_directory)
-            create_dict_from_keys(keys, metadatas)
-        else:
-            raise NotImplementedError()
+        raise NotImplementedError()
 
-    print(f"Ingestion complete! You can now run chat.py to query your documents")
+    print(f"Ingestion complete!")
 
 
 if __name__ == "__main__":
