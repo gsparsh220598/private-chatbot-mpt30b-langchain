@@ -24,17 +24,19 @@ openai.api_key = os.environ.get("OPENAI_API_KEY")
 embeddings_model_name = os.environ.get("EMBEDDINGS_MODEL_NAME")
 persist_directory = os.environ.get("PERSIST_DIRECTORY")
 model_path = os.environ.get("MODEL_PATH")
-target_source_chunks = int(os.environ.get("TARGET_SOURCE_CHUNKS", 10))
+# target_source_chunks = int(os.environ.get("TARGET_SOURCE_CHUNKS", 10))
 emb_type = os.environ.get("EMB_TYPE")
 vs_type = os.environ.get("VS_TYPE")
+search_kwargs = SEARCH_KWARGS
 
 
 def get_retriever(vs_type):
     if vs_type == "redis":
         db = load_redis_vector_store()
+        retriever = db.as_retriever(K=10, score_threshold=0.9)
     elif vs_type == "chroma":
         db = load_chroma_vector_store(persist_directory)
-    retriever = db.as_retriever(search_kwargs={"k": target_source_chunks})
+        retriever = db.as_retriever(search_kwargs=search_kwargs)
     return retriever
 
 
@@ -50,13 +52,17 @@ def get_qa_chain(llm, retriever, memory):
         chain_type=CHAIN_TYPE,
         return_source_documents=True,
     )
-    qa.combine_docs_chain.llm_chain.prompt = QA_PROMPT
+    # qa.combine_docs_chain.llm_chain.prompt = QNA_PROMPT
     return qa
 
 
 def main(vs_type):
     # Prepare the retriever
-    retriever = get_retriever(vs_type)
+    if vs_type == "redis":
+        db = load_redis_vector_store()
+        retriever = db.as_retriever(K=10, score_threshold=0.9)
+    else:
+        retriever = get_retriever(vs_type)
     memory = load_chat_history(qa=True, vs_type=vs_type)
     # Prepare the QA chain
     qa = get_qa_chain(llm, retriever, memory)
@@ -80,12 +86,11 @@ def main(vs_type):
             # print("\n\n> Question:")
             # print(query)
             print(f"\n> Answer (took {round(end - start, 2)} s.):")
-            # print(display(Markdown(answer)))
-
+            # printmd(answer)
             # Print the relevant sources used for the answer
             for document in docs:
-                print("\n> " + document.metadata["source"] + ":")
-            #     print(document.page_content)
+                # print("\n> " + document.metadata["source"] + ":")
+                print(document.page_content)
         except Exception as e:
             print(str(e))
             raise
@@ -100,19 +105,20 @@ def load_model(emb_type):
         emb_type = bool(emb_type == "hf")
         if emb_type:
             llm = CTransformers(
+                model="TheBloke/Llama-2-7B-Chat-GGML",
                 model=os.path.abspath(model_path),
-                model_type="mpt",
+                model_type="llama",
                 callbacks=[StreamingStdOutCallbackHandler()],
                 config={"temperature": 0.1},
             )
         else:
             llm = ChatOpenAI(
-                model_name=CHAT_MODEL,
+                model_name=CHAT_MODEL_16K,
                 temperature=0.1,
                 streaming=True,
                 callbacks=[StreamingStdOutCallbackHandler()],
             )
-            # cond_llm = OpenAI(model=COND_MODEL, temperature=0.1)
+            # cond_llm = OpenAI(model=CONDENSE_MODEL, temperature=0.1)
         return True
 
     except Exception as e:
